@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep:*)",
+      "Bash(ls -la /c/Projects/HeysoDiary/HeysoDiaryFrontEnd/.env* /c/Projects/HeysoDiary/HeysoDiaryBackEnd/src/main/resources)"
+    ]
+  }
+}
