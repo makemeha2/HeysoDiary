@@ -56,6 +56,7 @@ temp/
 # 7. Claude / AI tooling (선택적)
 ##################################################
 # 필요하면 주석 해제
+.claude/worktrees/
 # .claude/cache/
 # .claude/tmp/
 
