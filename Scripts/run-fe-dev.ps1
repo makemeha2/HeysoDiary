@@ -10,10 +10,8 @@ param(
 
 . "$PSScriptRoot\agent-common.ps1"
 
-Write-Host "[DEPRECATED] run-leader_after.ps1 는 leader_final 단계로 통합되었습니다. run-leader_after.ps1 는 계속 동작하지만, 새 스크립트는 run-cycle.ps1 또는 leader_final 역할을 사용하세요."
-
 Invoke-AgentRole `
-    -Role leader_final `
+    -Role fe_dev `
     -PlanName $PlanName `
     -Model $Model `
     -Cli $Cli `
