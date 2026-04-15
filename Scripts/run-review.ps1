@@ -5,7 +5,7 @@ param(
 . "$PSScriptRoot\agent-common.ps1"
 
 $config = Get-AgentPlanConfig
-$reviewPromptText = Read-Utf8File -Path $config.Prompts.reviewer
+$reviewPromptText = Get-AgentPromptText -Role reviewer -BasePromptPath $config.Prompts.reviewer
 $devReportText = Read-Utf8File -Path $config.Reports.dev
 $diffText = Read-Utf8File -Path (Join-Path $config.Plan "dev_diff.patch")
 

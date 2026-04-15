@@ -125,6 +125,43 @@ function Read-Utf8File {
     return [System.IO.File]::ReadAllText($Path, $script:Utf8NoBom)
 }
 
+function Get-PlanAddendumFiles {
+    param(
+        [Parameter(Mandatory)][string]$Role
+    )
+
+    $commonPattern = Join-Path $script:Plan "prompt_addendum_*.md"
+    $rolePattern = Join-Path $script:Plan ("prompt_{0}_addendum_*.md" -f $Role)
+
+    $files = @()
+    $files += Get-ChildItem -Path $commonPattern -File -ErrorAction SilentlyContinue | Sort-Object Name
+    $files += Get-ChildItem -Path $rolePattern -File -ErrorAction SilentlyContinue | Sort-Object Name
+
+    return @($files)
+}
+
+function Get-AgentPromptText {
+    param(
+        [Parameter(Mandatory)][ValidateSet("leader", "dev", "reviewer", "qa")][string]$Role,
+        [Parameter(Mandatory)][string]$BasePromptPath
+    )
+
+    $sections = [System.Collections.Generic.List[string]]::new()
+    $sections.Add((Read-Utf8File -Path $BasePromptPath))
+
+    $addendumFiles = Get-PlanAddendumFiles -Role $Role
+    if ($addendumFiles.Count -gt 0) {
+        $sections.Add("`n---`n## 추가 요구사항 문서`n아래 문서를 기존 프롬프트와 함께 반드시 반영하라.")
+
+        foreach ($file in $addendumFiles) {
+            $content = Read-Utf8File -Path $file.FullName
+            $sections.Add(("`n### {0}`n{1}" -f $file.Name, $content))
+        }
+    }
+
+    return ($sections -join "`n")
+}
+
 function Write-Utf8File {
     param(
         [Parameter(Mandatory)][string]$Path,

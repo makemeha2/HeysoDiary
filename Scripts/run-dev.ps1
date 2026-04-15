@@ -14,7 +14,7 @@ if (-not (Test-Path $config.Reports.leader)) {
     throw "리더 보고서 파일이 없습니다: $($config.Reports.leader)"
 }
 
-$devPromptText = Read-Utf8File -Path $config.Prompts.dev
+$devPromptText = Get-AgentPromptText -Role dev -BasePromptPath $config.Prompts.dev
 $leaderReportText = Read-Utf8File -Path $config.Reports.leader
 
 $promptText = @"

@@ -5,7 +5,7 @@ param(
 . "$PSScriptRoot\agent-common.ps1"
 
 $config = Get-AgentPlanConfig
-$leaderPromptText = Read-Utf8File -Path $config.Prompts.leader
+$leaderPromptText = Get-AgentPromptText -Role leader -BasePromptPath $config.Prompts.leader
 
 $promptText = @"
 $leaderPromptText

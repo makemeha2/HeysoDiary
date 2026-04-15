@@ -5,7 +5,7 @@ param(
 . "$PSScriptRoot\agent-common.ps1"
 
 $config = Get-AgentPlanConfig
-$qaPromptText = Read-Utf8File -Path $config.Prompts.qa
+$qaPromptText = Get-AgentPromptText -Role qa -BasePromptPath $config.Prompts.qa
 $devReportText = Read-Utf8File -Path $config.Reports.dev
 $reviewReportText = Read-Utf8File -Path $config.Reports.reviewer
 
@@ -29,4 +29,4 @@ $reviewReportText
 출력은 markdown 형식으로 작성하라.
 "@
 
-Invoke-AgentPrompt -Role qa -Cli claude -Model $Model -PromptText $promptText -OutputPath $config.Reports.qa
+Invoke-AgentPrompt -Role qa -Cli codex -Model $Model -PromptText $promptText -OutputPath $config.Reports.qa
