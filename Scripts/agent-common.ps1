@@ -249,7 +249,7 @@ function Apply-HashtableOverrides {
 
 function Get-AgentPlanConfig {
     param(
-        [string]$PlanName = "event_monitoring",
+        [string]$PlanName = "",
         [hashtable]$Overrides = @{}
     )
 
