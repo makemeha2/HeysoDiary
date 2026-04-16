@@ -1421,6 +1421,19 @@ function Set-AgentStatus {
         }
     }
 
+    # Always refresh role invariants from the current resolved config so stale values
+    # from a previous run do not survive in the status file.
+    $status["Role"] = $RoleConfig.Role
+    $status["Model"] = $RoleConfig.Model
+    $status["Provider"] = $RoleConfig.Provider
+    $status["Cli"] = $RoleConfig.Cli
+    $status["WorkingDirectory"] = $RoleConfig.WorkingDirectory
+    $status["PromptPath"] = $RoleConfig.PromptPath
+    $status["ReportPath"] = $RoleConfig.ReportPath
+    $status["OutputPath"] = $RoleConfig.ReportPath
+    $status["OutLogPath"] = $RoleConfig.OutLogPath
+    $status["ErrLogPath"] = $RoleConfig.ErrLogPath
+
     if ($Values) {
         foreach ($key in $Values.Keys) {
             $status[$key] = $Values[$key]
