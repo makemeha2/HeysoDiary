@@ -101,6 +101,26 @@ function Write-JsonFile {
     Write-Utf8File -Path $Path -Content $json
 }
 
+function Get-JsonObjectFromFile {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    $raw = Get-Content -Raw -LiteralPath $Path -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return $null
+    }
+
+    try {
+        return ($raw | ConvertFrom-Json)
+    }
+    catch {
+        return $null
+    }
+}
+
 function Read-JsonFile {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -123,11 +143,15 @@ function Resolve-ProviderFromModel {
         return "openai"
     }
 
-    if ($Model -in @("opus", "sonnet")) {
+    if ($Model -in @("opus", "sonnet", "haiku")) {
         return "anthropic"
     }
 
-    throw "지원하지 않는 모델입니다: $Model. 현재는 gpt-* / opus / sonnet 만 지원합니다. 모델명을 확인하거나 Get-AgentPlanConfig 기본값을 수정하세요."
+    if ($Model -match '^(claude-)?(opus|sonnet|haiku)(-|$)') {
+        return "anthropic"
+    }
+
+    throw "지원하지 않는 모델입니다: $Model. 현재는 gpt-* / claude-* / opus / sonnet / haiku 만 지원합니다. 모델명을 확인하거나 Get-AgentPlanConfig 기본값을 수정하세요."
 }
 
 function Resolve-CliFromProvider {
@@ -139,13 +163,28 @@ function Resolve-CliFromProvider {
     }
 }
 
+function Normalize-AgentCli {
+    param([AllowEmptyString()][string]$Cli)
+
+    if ([string]::IsNullOrWhiteSpace($Cli)) {
+        return $null
+    }
+
+    $normalized = $Cli.Trim().ToLowerInvariant()
+    if ($normalized -notin @("claude", "codex")) {
+        throw "지원하지 않는 CLI 입니다: $Cli. 허용값: claude, codex"
+    }
+
+    return $normalized
+}
+
 function Get-DefaultRoleDefinitions {
     param([Parameter(Mandatory)][hashtable]$Paths)
 
     return [ordered]@{
         leader = [ordered]@{
             Role = "leader"
-            DefaultModel = "gpt-5.4"
+            DefaultModel = "claude-opus-4-6"
             WorkingDirectory = $Paths.Root
             PromptCandidates = @("prompt_leader.md", "prompt_master.md")
             AddendumAliases = @("leader", "master")
@@ -154,7 +193,7 @@ function Get-DefaultRoleDefinitions {
         }
         be_dev = [ordered]@{
             Role = "be_dev"
-            DefaultModel = "opus"
+            DefaultModel = "gpt-5.4"
             WorkingDirectory = $Paths.BackEnd
             PromptCandidates = @("prompt_backend.md", "prompt_developer.md")
             AddendumAliases = @("backend", "be_dev", "developer", "dev")
@@ -165,7 +204,7 @@ function Get-DefaultRoleDefinitions {
         }
         fe_dev = [ordered]@{
             Role = "fe_dev"
-            DefaultModel = "opus"
+            DefaultModel = "gpt-5.4"
             WorkingDirectory = $Paths.FrontEnd
             PromptCandidates = @("prompt_frontend.md", "prompt_developer.md")
             AddendumAliases = @("frontend", "fe_dev", "developer", "dev")
@@ -176,7 +215,7 @@ function Get-DefaultRoleDefinitions {
         }
         reviewer = [ordered]@{
             Role = "reviewer"
-            DefaultModel = "gpt-5.4"
+            DefaultModel = "claude-sonnet-4-6"
             WorkingDirectory = $Paths.Root
             PromptCandidates = @("prompt_reviewer.md")
             AddendumAliases = @("reviewer", "review")
@@ -185,7 +224,7 @@ function Get-DefaultRoleDefinitions {
         }
         qa = [ordered]@{
             Role = "qa"
-            DefaultModel = "sonnet"
+            DefaultModel = "claude-haiku-4-5"
             WorkingDirectory = $Paths.Root
             PromptCandidates = @("prompt_qa.md")
             AddendumAliases = @("qa")
@@ -373,7 +412,7 @@ function Get-ResolvedRoleConfig {
         [Parameter(Mandatory)][pscustomobject]$Config,
         [Parameter(Mandatory)][ValidateSet("leader", "be_dev", "fe_dev", "reviewer", "qa", "leader_final")][string]$Role,
         [string]$Model,
-        [ValidateSet("claude", "codex")][string]$Cli
+        [AllowEmptyString()][string]$Cli
     )
 
     $roleConfig = Copy-RoleConfig -RoleConfig $Config.Roles[$Role]
@@ -382,9 +421,10 @@ function Get-ResolvedRoleConfig {
         $roleConfig.Provider = Resolve-ProviderFromModel -Model $Model
     }
 
-    if ($Cli) {
-        $roleConfig.Cli = $Cli
-        $roleConfig.Provider = if ($Cli -eq "claude") { "anthropic" } else { "openai" }
+    $resolvedCli = Normalize-AgentCli -Cli $Cli
+    if ($resolvedCli) {
+        $roleConfig.Cli = $resolvedCli
+        $roleConfig.Provider = if ($resolvedCli -eq "claude") { "anthropic" } else { "openai" }
     }
     else {
         $roleConfig.Cli = Resolve-CliFromProvider -Provider $roleConfig.Provider
@@ -455,6 +495,380 @@ function Get-FileSection {
 ## $Title
 $content
 "@
+}
+
+function New-PlanSnapshotContent {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$Content,
+        [Parameter(Mandatory)][string]$Role
+    )
+
+    return @"
+# Local Plan Snapshot ($Role)
+
+- Source: $SourcePath
+- GeneratedAt: $((Get-Date).ToString("o"))
+
+---
+
+$Content
+"@
+}
+
+function Get-UserManagementBackendSnapshot {
+    return @"
+Use this snapshot instead of reading the full external plan.
+
+Goal
+- Build phase-1 admin user management backend for local and social users.
+
+In scope
+- Admin APIs under /api/admin/users/**
+- List/detail/create/update/status/password/delete
+- Self-protection and last-active-admin protection
+- LOCAL-only password reset and delete
+- Duplicate checks for email and LOCAL loginId
+- Block updates for WITHDRAWN users
+
+Out of scope
+- DB schema changes
+- Admin creation for GOOGLE/NAVER users
+- loginId change
+- Forced session invalidation after password reset
+- Cleanup of orphan rows after hard delete
+
+Reference patterns inside backend repo
+- monitoringMng for pagination/filter patterns
+- aiTemplate for admin CRUD endpoint style
+- user for existing domain and mapper reuse
+- auth/service/AdminAuthorizationService.java for requireAdminUser()
+
+Required endpoints
+- GET /api/admin/users
+- GET /api/admin/users/{userId}
+- POST /api/admin/users
+- POST /api/admin/users/{userId}/update
+- POST /api/admin/users/{userId}/status
+- POST /api/admin/users/{userId}/password
+- POST /api/admin/users/{userId}/delete
+
+Request/response rules
+- Base path: /api/admin/users
+- Require admin scope and admin role
+- Use ResponseEntity<T>
+- Return machine-readable errorCode for 409 responses
+
+Required 409 errorCode values
+- EMAIL_DUPLICATED
+- LOGIN_ID_DUPLICATED
+- CANNOT_DEMOTE_SELF
+- CANNOT_DEACTIVATE_SELF
+- CANNOT_DELETE_SELF
+- LAST_ADMIN_PROTECTED
+- ONLY_LOCAL_ALLOWED
+- WITHDRAWN_USER_IMMUTABLE
+
+Data/query rules
+- Query uses tb_user u LEFT JOIN tb_user_auth ua ON u.user_id = ua.user_id
+- keyword matches email, nickname, login_id
+- Filters: role, status, authProvider
+- Pagination: page, size, offset
+
+Create rules
+- LOCAL only
+- providerUserId = loginId
+- status = ACTIVE
+- password stored as BCrypt hash
+
+Update/status/delete rules
+- Cannot demote self
+- Cannot deactivate self
+- Cannot delete self
+- Protect the last ACTIVE ADMIN
+- WITHDRAWN user is immutable
+- Password reset and delete are LOCAL only
+
+Expected new backend module
+- userMng/controller/AdminUserController.java
+- userMng/service/AdminUserService.java
+- userMng/dto/*
+- userMng/mapper/AdminUserMapper.java
+- userMng/security/UserMngEndpointSecurity.java
+- src/main/resources/mapper/biz/userMng/AdminUserMapper.xml
+
+Reuse guidance
+- Reuse existing user/UserMapper where possible
+- Do not modify the existing user domain unless unavoidable
+- Follow the repo's MapStruct conventions for row-to-response mapping
+
+Validation checklist
+- list/detail/create/update/status/password/delete all wired
+- duplicate checks implemented
+- self-protection implemented
+- last active admin protection implemented
+- LOCAL-only restrictions implemented
+- tests or verification steps included in the final report
+"@
+}
+
+function Get-UserManagementFrontendSnapshot {
+    return @"
+Use this snapshot instead of reading the full external plan.
+
+Goal
+- Build phase-1 admin user management frontend page.
+
+In scope
+- /admin/user-mng page
+- List/detail/create/update/status/password/delete flows
+- Filters, pagination, detail modal, dialogs, forms
+- UI hints for self-protection rules
+- Error handling for backend 409 errorCode responses
+
+Out of scope
+- DB changes
+- OAuth user creation flows
+- loginId change
+- Forced session invalidation after password reset
+
+Reference patterns inside frontend repo
+- monitoringMng for page structure, filters, table, modal, pagination
+- AdminPageProvider / useAdminPageContext
+- adminFetch in src/admin/lib/api.ts
+- common components: AdminDataTable, AdminAlertDialog, AdminConfirmDialog, StatusFilterSelect
+
+Required route and integration
+- Add /admin/user-mng route
+- Add sidebar/menu entry
+- Add src/admin/lib/userApi.ts
+
+Expected new frontend structure
+- src/admin/pages/userMng/
+
+UI responsibilities
+- User list with keyword/role/status/authProvider filters
+- Detail view
+- LOCAL user create form
+- Update form for nickname and role
+- Status change dialog
+- LOCAL-only password reset dialog
+- LOCAL-only delete dialog
+
+Backend contract dependency
+- Base path: /api/admin/users
+- Use be_dev report/contracts first if available
+- Respect all backend restrictions and errorCode values
+
+Important UX rules
+- Hide or disable invalid actions when possible, but keep server as source of truth
+- Show clear feedback for self-demotion, self-deactivation, self-delete, last-admin protection
+- Handle WITHDRAWN users as read-only / immutable
+
+Required errorCode handling
+- EMAIL_DUPLICATED
+- LOGIN_ID_DUPLICATED
+- CANNOT_DEMOTE_SELF
+- CANNOT_DEACTIVATE_SELF
+- CANNOT_DELETE_SELF
+- LAST_ADMIN_PROTECTED
+- ONLY_LOCAL_ALLOWED
+- WITHDRAWN_USER_IMMUTABLE
+
+Validation checklist
+- route/menu connected
+- list/detail/filter/pagination working
+- create/update/status/password/delete flows covered
+- backend errorCode messages mapped
+- final report includes changed files, test steps, remaining risks
+"@
+}
+
+function Get-RolePlanSnapshotBody {
+    param(
+        [Parameter(Mandatory)][string]$PlanName,
+        [Parameter(Mandatory)][string]$Role,
+        [Parameter(Mandatory)][string]$RawPlanContent
+    )
+
+    if ($PlanName -eq "user_management") {
+        switch ($Role) {
+            "be_dev" { return (Get-UserManagementBackendSnapshot) }
+            "fe_dev" { return (Get-UserManagementFrontendSnapshot) }
+        }
+    }
+
+    $trimmed = $RawPlanContent.Trim()
+    if ($trimmed.Length -gt 6000) {
+        $trimmed = $trimmed.Substring(0, 6000).TrimEnd() + "`n`n[truncated]"
+    }
+
+    return @"
+Use this snapshot instead of reading the full external plan.
+
+Priority
+- Treat the source plan as the single source of truth.
+- Follow only the requirements relevant to the current role: $Role.
+
+Plan excerpt
+$trimmed
+"@
+}
+
+function Ensure-RolePlanSnapshot {
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Config,
+        [Parameter(Mandatory)][pscustomobject]$RoleConfig
+    )
+
+    $sourcePath = Join-Path $Config.PlanDir "plan.md"
+    if (-not (Test-Path -LiteralPath $sourcePath)) {
+        return ""
+    }
+
+    $contextDir = Join-Path $RoleConfig.WorkingDirectory ".agent-context\$($Config.PlanName)"
+    Ensure-Directory -Path $contextDir
+
+    # Mirror the plan into the role worktree so Claude can stay inside its allowed working directory.
+    $snapshotPath = Join-Path $contextDir "plan_snapshot.md"
+    $rawPlanContent = Read-Utf8File -Path $sourcePath
+    $summaryContent = Get-RolePlanSnapshotBody -PlanName $Config.PlanName -Role $RoleConfig.Role -RawPlanContent $rawPlanContent
+    Write-Utf8File -Path $snapshotPath -Content (New-PlanSnapshotContent -SourcePath $sourcePath -Content $summaryContent -Role $RoleConfig.Role)
+    return $snapshotPath
+}
+
+function Get-ClaudeProjectsRoot {
+    return (Join-Path $env:USERPROFILE ".claude\projects")
+}
+
+function Get-ClaudeSessionsRoot {
+    return (Join-Path $env:USERPROFILE ".claude\sessions")
+}
+
+function Get-ClaudeSessionInfo {
+    param([Parameter(Mandatory)][int]$ProcessId)
+
+    $sessionPath = Join-Path (Get-ClaudeSessionsRoot) ("{0}.json" -f $ProcessId)
+    $session = Get-JsonObjectFromFile -Path $sessionPath
+    if (-not $session -or [string]::IsNullOrWhiteSpace($session.sessionId)) {
+        return $null
+    }
+
+    # Claude writes progress into its own session jsonl, not necessarily to redirected stdout/stderr.
+    $logPath = Get-ChildItem -Path (Get-ClaudeProjectsRoot) -Filter ("{0}.jsonl" -f $session.sessionId) -Recurse -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+
+    return [pscustomobject]@{
+        SessionId = $session.sessionId
+        SessionPath = $sessionPath
+        LogPath = $logPath
+    }
+}
+
+function Get-CompactText {
+    param(
+        [AllowEmptyString()][string]$Text,
+        [int]$MaxLength = 140
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $compact = ($Text -replace '\s+', ' ').Trim()
+    if ($compact.Length -le $MaxLength) {
+        return $compact
+    }
+
+    return ($compact.Substring(0, $MaxLength) + "...")
+}
+
+function Get-ClaudeLogExcerpt {
+    param([string]$Path)
+
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+        return ""
+    }
+
+    $lines = Get-Content -LiteralPath $Path -Tail 12 -ErrorAction SilentlyContinue
+    if (-not $lines) {
+        return ""
+    }
+
+    for ($index = $lines.Count - 1; $index -ge 0; $index--) {
+        $line = $lines[$index]
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        try {
+            $entry = $line | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            $text = Get-CompactText -Text $line
+            if ($text) {
+                return $text
+            }
+
+            continue
+        }
+
+        if ($entry.PSObject.Properties.Name -contains "toolUseResult") {
+            $toolResult = $entry.toolUseResult
+            if ($toolResult -is [string]) {
+                $text = Get-CompactText -Text $toolResult
+                if ($text) {
+                    return $text
+                }
+            }
+            elseif ($toolResult -and $toolResult.PSObject.Properties.Name -contains "content") {
+                foreach ($item in $toolResult.content) {
+                    if ($item.text) {
+                        $text = Get-CompactText -Text $item.text
+                        if ($text) {
+                            return $text
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($entry.type -eq "queue-operation" -and $entry.operation) {
+            return ("Claude queue {0}" -f $entry.operation)
+        }
+
+        if ($entry.message) {
+            if ($entry.message.content -is [string]) {
+                $text = Get-CompactText -Text $entry.message.content
+                if ($text) {
+                    return $text
+                }
+            }
+
+            foreach ($item in @($entry.message.content)) {
+                if ($item.text) {
+                    $text = Get-CompactText -Text $item.text
+                    if ($text) {
+                        return $text
+                    }
+                }
+
+                if ($item.content) {
+                    $text = Get-CompactText -Text $item.content
+                    if ($text) {
+                        return $text
+                    }
+                }
+
+                if ($item.name) {
+                    return ("Claude tool: {0}" -f $item.name)
+                }
+            }
+        }
+    }
+
+    return ""
 }
 
 function Assert-CommandAvailable {
@@ -581,6 +995,12 @@ function Get-RolePromptPayload {
     $qaReportPath = $Config.Roles["qa"].ReportPath
     $beDiffPath = $Config.Roles["be_dev"].DiffPath
     $feDiffPath = $Config.Roles["fe_dev"].DiffPath
+    $planSnapshotPath = ""
+
+    # be_dev / fe_dev are the roles most affected by cross-repo doc access, so prepare a local snapshot for them.
+    if ($RoleConfig.Role -in @("be_dev", "fe_dev")) {
+        $planSnapshotPath = Ensure-RolePlanSnapshot -Config $Config -RoleConfig $RoleConfig
+    }
 
     switch ($RoleConfig.Role) {
         "leader" {
@@ -613,12 +1033,15 @@ NEXT_ORDER: be_dev -> fe_dev -> reviewer -> qa -> leader_final
             return @"
 $basePrompt
 
+$(Get-FileSection -Title "로컬 Plan 스냅샷" -Path $planSnapshotPath -WhenMissing "(plan 스냅샷 없음)")
+
 $(Get-FileSection -Title "Leader 보고서" -Path $leaderReportPath -WhenMissing "(leader 보고서 없음)")
 
 추가 지시:
 - 현재 역할은 be_dev 다.
 - 실제 작업 루트는 $($RoleConfig.WorkingDirectory) 이다.
-- plan.md 의 확정 의사결정이 있으면 최우선으로 따른다.
+- 작업 루트 바깥의 docs 경로를 직접 읽으려 하지 말고, 작업 루트 안에 생성된 로컬 plan 스냅샷을 우선 참고하라: $planSnapshotPath
+- plan.md 의 확정 의사결정이 있으면 로컬 plan 스냅샷 기준으로 최우선 반영하라.
 - 프론트 작업은 직접 구현하지 말고, BE 관점에서 필요한 계약과 산출물만 정리하라.
 - 결과는 markdown 형식으로 작성하고, 변경 파일 목록 / API 명세 / 테스트 방법 / 남은 리스크를 포함하라.
 "@
@@ -626,6 +1049,8 @@ $(Get-FileSection -Title "Leader 보고서" -Path $leaderReportPath -WhenMissing
         "fe_dev" {
             return @"
 $basePrompt
+
+$(Get-FileSection -Title "로컬 Plan 스냅샷" -Path $planSnapshotPath -WhenMissing "(plan 스냅샷 없음)")
 
 $(Get-FileSection -Title "Leader 보고서" -Path $leaderReportPath -WhenMissing "(leader 보고서 없음)")
 
@@ -637,7 +1062,8 @@ $(Get-FileSection -Title "be_dev diff" -Path $beDiffPath -WhenMissing "(be_dev d
 - 현재 역할은 fe_dev 다.
 - 실제 작업 루트는 $($RoleConfig.WorkingDirectory) 이다.
 - be_dev 산출물이 있으면 그 계약을 우선 참고하라.
-- plan.md 의 확정 의사결정이 있으면 최우선으로 따른다.
+- 작업 루트 바깥의 docs 경로를 직접 읽으려 하지 말고, 작업 루트 안에 생성된 로컬 plan 스냅샷을 우선 참고하라: $planSnapshotPath
+- plan.md 의 확정 의사결정이 있으면 로컬 plan 스냅샷 기준으로 최우선 반영하라.
 - 결과는 markdown 형식으로 작성하고, 변경 파일 목록 / 테스트 방법 / 남은 리스크를 포함하라.
 "@
         }
@@ -973,6 +1399,8 @@ function Get-DefaultStatusRecord {
         TotalTokens = 0
         RecentOutput = ""
         Note = ""
+        SessionId = ""
+        SessionLogPath = ""
         UpdatedAt = (Get-Date).ToString("o")
     }
 }
@@ -1159,6 +1587,11 @@ function Invoke-AgentPrompt {
     $stdoutPath = $RoleConfig.OutLogPath
     $stderrPath = $RoleConfig.ErrLogPath
     $resultPath = Join-Path $logDir ("{0}.{1}.result.txt" -f $RoleConfig.Role, $RunId)
+    $effectiveNoOutputTimeoutSec = $NoOutputTimeoutSec
+    # Claude can spend long periods updating only its internal session log, so keep the no-output threshold looser.
+    if ($RoleConfig.Cli -eq "claude" -and $effectiveNoOutputTimeoutSec -lt 1200) {
+        $effectiveNoOutputTimeoutSec = 1200
+    }
     Write-Utf8File -Path $inputPath -Content $PromptText
 
     $arguments = @($resolved.PrefixArguments)
@@ -1185,6 +1618,8 @@ function Invoke-AgentPrompt {
     $lastErrFileLength = 0L
     $lastOutputAt = $startedAt
     $lastStatusPrintAt = [datetime]::MinValue
+    $claudeSessionInfo = $null
+    $lastClaudeLogLength = 0L
 
     Set-AgentStatus -RoleConfig $RoleConfig -RunId $RunId -CycleRunId $CycleRunId -Values @{
         Status = "RUNNING"
@@ -1221,6 +1656,41 @@ function Invoke-AgentPrompt {
             }
         }
 
+        if ($RoleConfig.Cli -eq "claude") {
+            if (-not $claudeSessionInfo) {
+                # Session metadata appears asynchronously after process start, so keep retrying until it is available.
+                $claudeSessionInfo = Get-ClaudeSessionInfo -ProcessId $process.Id
+                if ($claudeSessionInfo) {
+                    Set-AgentStatus -RoleConfig $RoleConfig -RunId $RunId -CycleRunId $CycleRunId -Values @{
+                        SessionId = $claudeSessionInfo.SessionId
+                        SessionLogPath = $claudeSessionInfo.LogPath
+                    } | Out-Null
+                }
+            }
+            elseif (-not $claudeSessionInfo.LogPath) {
+                $refreshedClaudeSessionInfo = Get-ClaudeSessionInfo -ProcessId $process.Id
+                if ($refreshedClaudeSessionInfo -and $refreshedClaudeSessionInfo.LogPath) {
+                    $claudeSessionInfo = $refreshedClaudeSessionInfo
+                    Set-AgentStatus -RoleConfig $RoleConfig -RunId $RunId -CycleRunId $CycleRunId -Values @{
+                        SessionId = $claudeSessionInfo.SessionId
+                        SessionLogPath = $claudeSessionInfo.LogPath
+                    } | Out-Null
+                }
+            }
+
+            if ($claudeSessionInfo -and $claudeSessionInfo.LogPath -and (Test-Path -LiteralPath $claudeSessionInfo.LogPath)) {
+                # Treat Claude's internal session jsonl as heartbeat output when stdout/stderr stay silent.
+                $claudeLogItem = Get-Item -LiteralPath $claudeSessionInfo.LogPath
+                if ($claudeLogItem.Length -gt $lastClaudeLogLength) {
+                    $lastClaudeLogLength = $claudeLogItem.Length
+                    $lastOutputAt = $now
+                    if (-not $recentOutput) {
+                        $recentOutput = Get-ClaudeLogExcerpt -Path $claudeSessionInfo.LogPath
+                    }
+                }
+            }
+        }
+
         if (($now - $startedAt).TotalSeconds -gt $TimeoutSec) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             Set-AgentStatus -RoleConfig $RoleConfig -RunId $RunId -CycleRunId $CycleRunId -Values @{
@@ -1235,7 +1705,7 @@ function Invoke-AgentPrompt {
             throw "$($RoleConfig.Role) 실행이 $TimeoutSec 초를 초과했습니다. 프롬프트를 줄이거나 CLI 상태를 확인한 뒤 다시 실행하세요."
         }
 
-        if (($now - $lastOutputAt).TotalSeconds -gt $NoOutputTimeoutSec) {
+        if (($now - $lastOutputAt).TotalSeconds -gt $effectiveNoOutputTimeoutSec) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             Set-AgentStatus -RoleConfig $RoleConfig -RunId $RunId -CycleRunId $CycleRunId -Values @{
                 Status = "NO_OUTPUT_TIMEOUT"
@@ -1246,7 +1716,7 @@ function Invoke-AgentPrompt {
                 RecentOutput = "최근 출력이 없어 중단했습니다."
                 Note = "No output timeout"
             } | Out-Null
-            throw "$($RoleConfig.Role) 실행 중 $NoOutputTimeoutSec 초 동안 새 출력이 없었습니다. CLI 가 멈췄는지 확인하고 로그를 점검한 뒤 다시 실행하세요."
+            throw "$($RoleConfig.Role) 실행 중 $effectiveNoOutputTimeoutSec 초 동안 새 출력이 없었습니다. CLI 가 멈췄는지 확인하고 로그를 점검한 뒤 다시 실행하세요."
         }
 
         Set-AgentStatus -RoleConfig $RoleConfig -RunId $RunId -CycleRunId $CycleRunId -Values @{
@@ -1320,7 +1790,7 @@ function Invoke-AgentRole {
         [Parameter(Mandatory)][ValidateSet("leader", "be_dev", "fe_dev", "reviewer", "qa", "leader_final")][string]$Role,
         [string]$PlanName = "",
         [string]$Model,
-        [ValidateSet("claude", "codex")][string]$Cli,
+        [AllowEmptyString()][string]$Cli,
         [switch]$DryRun,
         [string]$MockOutputPath,
         [hashtable]$MockMetadata = @{},

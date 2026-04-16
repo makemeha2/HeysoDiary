@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$PlanName,
     [string]$Model,
-    [ValidateSet("claude", "codex")][string]$Cli,
+    [AllowEmptyString()][string]$Cli,
     [switch]$DryRun,
     [string]$MockOutputPath,
     [int]$TimeoutSec = 2700,
