@@ -1,5 +1,5 @@
 param(
-    [string]$PlanName = "event_monitoring",
+    [string]$PlanName = "user_management",
     [int]$MaxCycles = 1,
     [string]$LeaderModel,
     [string]$BeModel,

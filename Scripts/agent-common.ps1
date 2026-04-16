@@ -253,6 +253,10 @@ function Get-AgentPlanConfig {
         [hashtable]$Overrides = @{}
     )
 
+    if ([string]::IsNullOrWhiteSpace($PlanName)) {
+        throw "-PlanName 값은 필수입니다. HeysoDiaryDocs/docs/plans 아래의 plan 디렉토리 이름을 전달하세요."
+    }
+
     $paths = [ordered]@{
         Root = $script:Root
         Docs = Join-Path $script:Root "HeysoDiaryDocs"
@@ -1314,7 +1318,7 @@ function Invoke-AgentPrompt {
 function Invoke-AgentRole {
     param(
         [Parameter(Mandatory)][ValidateSet("leader", "be_dev", "fe_dev", "reviewer", "qa", "leader_final")][string]$Role,
-        [string]$PlanName = "event_monitoring",
+        [string]$PlanName = "",
         [string]$Model,
         [ValidateSet("claude", "codex")][string]$Cli,
         [switch]$DryRun,

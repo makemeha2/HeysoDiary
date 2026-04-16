@@ -1,5 +1,5 @@
 param(
-    [string]$PlanName = "event_monitoring",
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$PlanName,
     [string]$BeModel,
     [string]$FeModel,
     [ValidateSet("claude", "codex")][string]$BeCli,
