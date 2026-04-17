@@ -233,7 +233,7 @@ function Get-DefaultRoleDefinitions {
         }
         leader_final = [ordered]@{
             Role = "leader_final"
-            DefaultModel = "gpt-5.4"
+            DefaultModel = "claude-opus-4-6"
             WorkingDirectory = $Paths.Root
             PromptCandidates = @("prompt_leader.md", "prompt_master.md")
             AddendumAliases = @("leader", "leader_final", "master")
