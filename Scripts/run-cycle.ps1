@@ -1,16 +1,19 @@
 param(
     [string]$PlanName = "user_management",
     [int]$MaxCycles = 1,
+    [int]$MaxReviewReworkPasses = 1,
     [string]$LeaderModel,
     [string]$BeModel,
     [string]$FeModel,
     [string]$ReviewerModel,
+    [string]$LeaderReviewModel,
     [string]$QaModel,
     [string]$LeaderFinalModel,
     [AllowEmptyString()][string]$LeaderCli,
     [AllowEmptyString()][string]$BeCli,
     [AllowEmptyString()][string]$FeCli,
     [AllowEmptyString()][string]$ReviewerCli,
+    [AllowEmptyString()][string]$LeaderReviewCli,
     [AllowEmptyString()][string]$QaCli,
     [AllowEmptyString()][string]$LeaderFinalCli,
     [switch]$DryRun,
@@ -26,6 +29,10 @@ param(
 
 if ($MaxCycles -ne 1) {
     throw "현재 1차 구현에서는 MaxCycles=1 만 지원합니다. 반복 실행이 필요하면 leader_final_report 를 확인한 뒤 run-cycle.ps1 을 다시 실행하세요."
+}
+
+if ($MaxReviewReworkPasses -lt 0) {
+    throw "MaxReviewReworkPasses 는 0 이상이어야 합니다."
 }
 
 function Get-RoleMockPath {
@@ -44,6 +51,60 @@ function Get-RoleMockPath {
     }
 
     return $null
+}
+
+function Invoke-DirectedDevRoles {
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Directives,
+        [Parameter(Mandatory)][string]$DecisionSource,
+        [switch]$PreserveExistingOnSkip
+    )
+
+    $beRoleConfig = Get-ResolvedRoleConfig -Config $config -Role "be_dev" -Model $BeModel -Cli $BeCli
+    if ($Directives.BeRequired) {
+        Write-Host ("[CYCLE] step=be_dev action=run source={0}" -f $DecisionSource)
+        Invoke-AgentRole `
+            -Role be_dev `
+            -PlanName $PlanName `
+            -Model $BeModel `
+            -Cli $BeCli `
+            -DryRun:$DryRun `
+            -MockOutputPath (Get-RoleMockPath -BaseDir $MockOutputDir -Role "be_dev") `
+            -TimeoutSec $TimeoutSec `
+            -NoOutputTimeoutSec $NoOutputTimeoutSec `
+            -RunId $cycleRunId `
+            -CycleRunId $cycleRunId | Out-Null
+    }
+    elseif ($PreserveExistingOnSkip -and (Test-Path -LiteralPath $beRoleConfig.ReportPath)) {
+        Write-Host ("[CYCLE] step=be_dev action=preserve source={0}" -f $DecisionSource)
+    }
+    else {
+        Write-Host ("[CYCLE] step=be_dev action=pass source={0}" -f $DecisionSource)
+        Write-PassRoleArtifacts -RoleConfig $beRoleConfig -Status "PASSED" -Reason "$DecisionSource 가 BE_REQUIRED=false 로 판정했습니다." -RunId $cycleRunId -CycleRunId $cycleRunId
+    }
+
+    $feRoleConfig = Get-ResolvedRoleConfig -Config $config -Role "fe_dev" -Model $FeModel -Cli $FeCli
+    if ($Directives.FeRequired) {
+        Write-Host ("[CYCLE] step=fe_dev action=run source={0}" -f $DecisionSource)
+        Invoke-AgentRole `
+            -Role fe_dev `
+            -PlanName $PlanName `
+            -Model $FeModel `
+            -Cli $FeCli `
+            -DryRun:$DryRun `
+            -MockOutputPath (Get-RoleMockPath -BaseDir $MockOutputDir -Role "fe_dev") `
+            -TimeoutSec $TimeoutSec `
+            -NoOutputTimeoutSec $NoOutputTimeoutSec `
+            -RunId $cycleRunId `
+            -CycleRunId $cycleRunId | Out-Null
+    }
+    elseif ($PreserveExistingOnSkip -and (Test-Path -LiteralPath $feRoleConfig.ReportPath)) {
+        Write-Host ("[CYCLE] step=fe_dev action=preserve source={0}" -f $DecisionSource)
+    }
+    else {
+        Write-Host ("[CYCLE] step=fe_dev action=pass source={0}" -f $DecisionSource)
+        Write-PassRoleArtifacts -RoleConfig $feRoleConfig -Status "PASSED" -Reason "$DecisionSource 가 FE_REQUIRED=false 로 판정했습니다." -RunId $cycleRunId -CycleRunId $cycleRunId
+    }
 }
 
 $config = Get-AgentPlanConfig -PlanName $PlanName
@@ -83,45 +144,7 @@ try {
         throw "leader_report.md 에서 BE_REQUIRED 또는 FE_REQUIRED 헤더를 읽지 못했습니다. leader 프롬프트가 헤더를 출력했는지 확인하거나 DryRun mock 값을 사용하세요."
     }
 
-    $beRoleConfig = Get-ResolvedRoleConfig -Config $config -Role "be_dev" -Model $BeModel -Cli $BeCli
-    if ($leaderDirectives.BeRequired) {
-        Write-Host "[CYCLE] step=be_dev action=run"
-        Invoke-AgentRole `
-            -Role be_dev `
-            -PlanName $PlanName `
-            -Model $BeModel `
-            -Cli $BeCli `
-            -DryRun:$DryRun `
-            -MockOutputPath (Get-RoleMockPath -BaseDir $MockOutputDir -Role "be_dev") `
-            -TimeoutSec $TimeoutSec `
-            -NoOutputTimeoutSec $NoOutputTimeoutSec `
-            -RunId $cycleRunId `
-            -CycleRunId $cycleRunId | Out-Null
-    }
-    else {
-        Write-Host "[CYCLE] step=be_dev action=pass"
-        Write-PassRoleArtifacts -RoleConfig $beRoleConfig -Status "PASSED" -Reason "leader 가 BE_REQUIRED=false 로 판정했습니다." -RunId $cycleRunId -CycleRunId $cycleRunId
-    }
-
-    $feRoleConfig = Get-ResolvedRoleConfig -Config $config -Role "fe_dev" -Model $FeModel -Cli $FeCli
-    if ($leaderDirectives.FeRequired) {
-        Write-Host "[CYCLE] step=fe_dev action=run"
-        Invoke-AgentRole `
-            -Role fe_dev `
-            -PlanName $PlanName `
-            -Model $FeModel `
-            -Cli $FeCli `
-            -DryRun:$DryRun `
-            -MockOutputPath (Get-RoleMockPath -BaseDir $MockOutputDir -Role "fe_dev") `
-            -TimeoutSec $TimeoutSec `
-            -NoOutputTimeoutSec $NoOutputTimeoutSec `
-            -RunId $cycleRunId `
-            -CycleRunId $cycleRunId | Out-Null
-    }
-    else {
-        Write-Host "[CYCLE] step=fe_dev action=pass"
-        Write-PassRoleArtifacts -RoleConfig $feRoleConfig -Status "PASSED" -Reason "leader 가 FE_REQUIRED=false 로 판정했습니다." -RunId $cycleRunId -CycleRunId $cycleRunId
-    }
+    Invoke-DirectedDevRoles -Directives $leaderDirectives -DecisionSource "leader"
 
     Write-Host "[CYCLE] step=reviewer"
     Invoke-AgentRole `
@@ -136,18 +159,78 @@ try {
         -RunId $cycleRunId `
         -CycleRunId $cycleRunId | Out-Null
 
-    Write-Host "[CYCLE] step=qa"
-    Invoke-AgentRole `
-        -Role qa `
-        -PlanName $PlanName `
-        -Model $QaModel `
-        -Cli $QaCli `
-        -DryRun:$DryRun `
-        -MockOutputPath (Get-RoleMockPath -BaseDir $MockOutputDir -Role "qa") `
-        -TimeoutSec $TimeoutSec `
-        -NoOutputTimeoutSec $NoOutputTimeoutSec `
-        -RunId $cycleRunId `
-        -CycleRunId $cycleRunId | Out-Null
+    $reworkPassesUsed = 0
+    $qaExecuted = $false
+    $qaSkipReason = $null
+
+    while ($true) {
+        Write-Host "[CYCLE] step=leader_review"
+        Invoke-AgentRole `
+            -Role leader_review `
+            -PlanName $PlanName `
+            -Model $LeaderReviewModel `
+            -Cli $LeaderReviewCli `
+            -DryRun:$DryRun `
+            -MockOutputPath (Get-RoleMockPath -BaseDir $MockOutputDir -Role "leader_review") `
+            -TimeoutSec $TimeoutSec `
+            -NoOutputTimeoutSec $NoOutputTimeoutSec `
+            -RunId $cycleRunId `
+            -CycleRunId $cycleRunId | Out-Null
+
+        $leaderReviewDirectives = Get-ReportDirectives -Path $config.Roles["leader_review"].ReportPath
+        if ($null -eq $leaderReviewDirectives.BeRequired -or $null -eq $leaderReviewDirectives.FeRequired) {
+            throw "leader_review_report.md 에서 BE_REQUIRED 또는 FE_REQUIRED 헤더를 읽지 못했습니다. leader_review 출력 형식을 확인하세요."
+        }
+
+        $needsReviewerDrivenRework = $leaderReviewDirectives.BeRequired -or $leaderReviewDirectives.FeRequired
+        if (-not $needsReviewerDrivenRework) {
+            Write-Host "[CYCLE] step=qa action=run"
+            Invoke-AgentRole `
+                -Role qa `
+                -PlanName $PlanName `
+                -Model $QaModel `
+                -Cli $QaCli `
+                -DryRun:$DryRun `
+                -MockOutputPath (Get-RoleMockPath -BaseDir $MockOutputDir -Role "qa") `
+                -TimeoutSec $TimeoutSec `
+                -NoOutputTimeoutSec $NoOutputTimeoutSec `
+                -RunId $cycleRunId `
+                -CycleRunId $cycleRunId | Out-Null
+            $qaExecuted = $true
+            break
+        }
+
+        if ($reworkPassesUsed -ge $MaxReviewReworkPasses) {
+            $qaSkipReason = "leader_review 가 reviewer 지적에 따른 재개발이 필요하다고 판정했지만, 허용된 재작업 횟수($MaxReviewReworkPasses)를 모두 사용해 qa 를 생략했습니다."
+            Write-Warning $qaSkipReason
+            break
+        }
+
+        $reworkPassesUsed += 1
+        Invoke-DirectedDevRoles -Directives $leaderReviewDirectives -DecisionSource "leader_review" -PreserveExistingOnSkip
+
+        Write-Host ("[CYCLE] step=reviewer action=rerun pass={0}" -f $reworkPassesUsed)
+        Invoke-AgentRole `
+            -Role reviewer `
+            -PlanName $PlanName `
+            -Model $ReviewerModel `
+            -Cli $ReviewerCli `
+            -DryRun:$DryRun `
+            -MockOutputPath (Get-RoleMockPath -BaseDir $MockOutputDir -Role "reviewer") `
+            -TimeoutSec $TimeoutSec `
+            -NoOutputTimeoutSec $NoOutputTimeoutSec `
+            -RunId $cycleRunId `
+            -CycleRunId $cycleRunId | Out-Null
+    }
+
+    if (-not $qaExecuted) {
+        $qaRoleConfig = Get-ResolvedRoleConfig -Config $config -Role "qa" -Model $QaModel -Cli $QaCli
+        if (-not $qaSkipReason) {
+            $qaSkipReason = "leader_review 판정에 따라 qa 실행이 필요하지 않았습니다."
+        }
+        Write-Host "[CYCLE] step=qa action=skip"
+        Write-PassRoleArtifacts -RoleConfig $qaRoleConfig -Status "SKIPPED" -Reason $qaSkipReason -RunId $cycleRunId -CycleRunId $cycleRunId
+    }
 
     $leaderFinalMock = @{}
     if ($MockFinalDecision) {

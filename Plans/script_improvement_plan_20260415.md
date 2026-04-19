@@ -33,8 +33,6 @@ C:\Projects\HeysoDiary  [https://github.com/makemeha2/HeysoDiary.git: main]
 ├─ Scripts
 │  ├─ agent-common.ps1
 │  ├─ run-dev.ps1
-│  ├─ run-leader_after.ps1
-│  ├─ run-leader-reorder.ps1
 │  ├─ run-leader.ps1
 │  ├─ run-qa.ps1
 │  ├─ run-review.ps1
@@ -125,7 +123,7 @@ C:\Projects\HeysoDiary  [https://github.com/makemeha2/HeysoDiary.git: main]
 
 권장:
 - `leader_after`를 별도 스크립트로 유지하기보다 `run-leader.ps1 -Mode Final` 형태로 통합
-- `run-leader-reorder.ps1`도 가능하면 `run-leader.ps1` 내부 모드로 흡수
+- 중간 호환용 스크립트는 별도 유지하지 않고 `run-cycle.ps1` 또는 `run-leader.ps1` 경로로 통합
 
 ### 핵심 원칙
 1. **역할별 설정 분리**

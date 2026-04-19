@@ -222,6 +222,15 @@ function Get-DefaultRoleDefinitions {
             ReportFileName = "reviewer_report.md"
             NeedsGitArtifacts = $false
         }
+        leader_review = [ordered]@{
+            Role = "leader_review"
+            DefaultModel = "claude-opus-4-6"
+            WorkingDirectory = $Paths.Root
+            PromptCandidates = @("prompt_leader.md", "prompt_master.md")
+            AddendumAliases = @("leader", "leader_review", "master")
+            ReportFileName = "leader_review_report.md"
+            NeedsGitArtifacts = $false
+        }
         qa = [ordered]@{
             Role = "qa"
             DefaultModel = "claude-haiku-4-5"
@@ -410,7 +419,7 @@ function Copy-RoleConfig {
 function Get-ResolvedRoleConfig {
     param(
         [Parameter(Mandatory)][pscustomobject]$Config,
-        [Parameter(Mandatory)][ValidateSet("leader", "be_dev", "fe_dev", "reviewer", "qa", "leader_final")][string]$Role,
+        [Parameter(Mandatory)][ValidateSet("leader", "be_dev", "fe_dev", "reviewer", "leader_review", "qa", "leader_final")][string]$Role,
         [string]$Model,
         [AllowEmptyString()][string]$Cli
     )
@@ -952,6 +961,11 @@ function Assert-RolePrerequisites {
                 throw "검토할 개발 보고서가 없습니다. 먼저 run-be-dev.ps1, run-fe-dev.ps1 또는 run-cycle.ps1 을 실행하세요."
             }
         }
+        "leader_review" {
+            if (-not (Test-Path -LiteralPath $Config.Roles["reviewer"].ReportPath)) {
+                throw "reviewer_report.md 가 없습니다. 먼저 run-review.ps1 또는 run-cycle.ps1 을 실행하세요."
+            }
+        }
         "qa" {
             if (-not (Test-Path -LiteralPath $Config.Roles["reviewer"].ReportPath)) {
                 throw "reviewer_report.md 가 없습니다. 먼저 run-review.ps1 또는 run-cycle.ps1 을 실행하세요."
@@ -992,6 +1006,7 @@ function Get-RolePromptPayload {
     $beReportPath = $Config.Roles["be_dev"].ReportPath
     $feReportPath = $Config.Roles["fe_dev"].ReportPath
     $reviewerReportPath = $Config.Roles["reviewer"].ReportPath
+    $leaderReviewReportPath = $Config.Roles["leader_review"].ReportPath
     $qaReportPath = $Config.Roles["qa"].ReportPath
     $beDiffPath = $Config.Roles["be_dev"].DiffPath
     $feDiffPath = $Config.Roles["fe_dev"].DiffPath
@@ -1012,14 +1027,14 @@ $basePrompt
 - 문서/오케스트레이션 루트는 $($Config.Root) 이다.
 - BE 저장소는 $($Config.Repositories.BackEnd), FE 저장소는 $($Config.Repositories.FrontEnd) 이다.
 - 이번 단계는 leader 초기 판단 단계다.
-- 1차 구현에서는 be_dev -> fe_dev 순차 실행만 허용된다.
+- 초기 개발 오더는 be_dev -> fe_dev 순차 실행만 허용된다.
 - 이번 cycle 에서 be_dev / fe_dev 수행 필요 여부를 반드시 판정하라.
 - 결과 맨 앞에 아래 헤더를 정확히 작성하라.
 
 Decision: REWORK_REQUIRED
 BE_REQUIRED: true
 FE_REQUIRED: true
-NEXT_ORDER: be_dev -> fe_dev -> reviewer -> qa -> leader_final
+NEXT_ORDER: be_dev -> fe_dev -> reviewer -> leader_review
 
 본문에는 아래 항목을 포함하라.
 ### 1. 현재 단계
@@ -1087,6 +1102,41 @@ $(Get-FileSection -Title "fe_dev diff" -Path $feDiffPath -WhenMissing "(fe_dev d
 - 치명적 문제 / 수정 권장 / 문서 불일치 / 승인 가능 여부를 분리해서 작성하라.
 "@
         }
+        "leader_review" {
+            return @"
+$basePrompt
+
+$(Get-FileSection -Title "초기 Leader 보고서" -Path $leaderReportPath -WhenMissing "(leader 보고서 없음)")
+
+$(Get-FileSection -Title "be_dev 보고서" -Path $beReportPath -WhenMissing "(be_dev 보고서 없음)")
+
+$(Get-FileSection -Title "fe_dev 보고서" -Path $feReportPath -WhenMissing "(fe_dev 보고서 없음)")
+
+$(Get-FileSection -Title "Reviewer 보고서" -Path $reviewerReportPath -WhenMissing "(reviewer 보고서 없음)")
+
+추가 지시:
+- 현재 역할은 leader_review 다.
+- 이 단계의 목적은 reviewer 보고서를 읽고, 실제 구현 재작업이 필요한지 선별하는 것이다.
+- reviewer 보고서의 `치명적 문제`, `수정 권장 사항`, `승인 가능 여부`, `개발자 AI에게 전달할 수정 지시문`을 우선 읽어라.
+- 단순 문안/선호 차이나 문서화 제안만 있으면 qa 로 넘길 수 있다.
+- 실제 코드 수정이 필요한 경우에만 be_dev / fe_dev 를 다시 호출하라.
+- 재작업이 필요하면 BE_REQUIRED / FE_REQUIRED 를 정확히 표시하고 NEXT_ORDER 를 개발 오더 기준으로 적어라.
+- 재작업이 필요 없으면 BE_REQUIRED=false, FE_REQUIRED=false, NEXT_ORDER: qa 로 작성하라.
+- 결과 맨 앞에 아래 헤더를 정확히 작성하라.
+
+Decision: REWORK_REQUIRED
+BE_REQUIRED: true
+FE_REQUIRED: false
+NEXT_ORDER: be_dev -> reviewer -> leader_review
+
+본문에는 아래 항목을 포함하라.
+### 1. 현재 단계
+### 2. 현재 판정
+### 3. 근거
+### 4. 다음 액션
+### 5. 체크리스트
+"@
+        }
         "qa" {
             return @"
 $basePrompt
@@ -1098,6 +1148,8 @@ $(Get-FileSection -Title "be_dev 보고서" -Path $beReportPath -WhenMissing "(b
 $(Get-FileSection -Title "fe_dev 보고서" -Path $feReportPath -WhenMissing "(fe_dev 보고서 없음)")
 
 $(Get-FileSection -Title "Reviewer 보고서" -Path $reviewerReportPath -WhenMissing "(reviewer 보고서 없음)")
+
+$(Get-FileSection -Title "Leader Review 보고서" -Path $leaderReviewReportPath -WhenMissing "(leader_review 보고서 없음)")
 
 추가 지시:
 - 현재 역할은 qa 다.
@@ -1116,6 +1168,8 @@ $(Get-FileSection -Title "be_dev 보고서" -Path $beReportPath -WhenMissing "(b
 $(Get-FileSection -Title "fe_dev 보고서" -Path $feReportPath -WhenMissing "(fe_dev 보고서 없음)")
 
 $(Get-FileSection -Title "Reviewer 보고서" -Path $reviewerReportPath -WhenMissing "(reviewer 보고서 없음)")
+
+$(Get-FileSection -Title "Leader Review 보고서" -Path $leaderReviewReportPath -WhenMissing "(leader_review 보고서 없음)")
 
 $(Get-FileSection -Title "QA 보고서" -Path $qaReportPath -WhenMissing "(qa 보고서 없음)")
 
@@ -1148,6 +1202,7 @@ function Get-MockTokenUsage {
         "be_dev" { return [pscustomobject]@{ PromptTokens = 5000; CompletionTokens = 2200; TotalTokens = 7200 } }
         "fe_dev" { return [pscustomobject]@{ PromptTokens = 4800; CompletionTokens = 2100; TotalTokens = 6900 } }
         "reviewer" { return [pscustomobject]@{ PromptTokens = 1400; CompletionTokens = 900; TotalTokens = 2300 } }
+        "leader_review" { return [pscustomobject]@{ PromptTokens = 1600; CompletionTokens = 900; TotalTokens = 2500 } }
         "qa" { return [pscustomobject]@{ PromptTokens = 2100; CompletionTokens = 1100; TotalTokens = 3200 } }
         "leader_final" { return [pscustomobject]@{ PromptTokens = 800; CompletionTokens = 500; TotalTokens = 1300 } }
     }
@@ -1177,7 +1232,7 @@ function Get-MockOutputContent {
 Decision: $decision
 BE_REQUIRED: $beRequired
 FE_REQUIRED: $feRequired
-NEXT_ORDER: be_dev -> fe_dev -> reviewer -> qa -> leader_final
+NEXT_ORDER: be_dev -> fe_dev -> reviewer -> leader_review
 
 ### 1. 현재 단계
 - DEV 요청
@@ -1260,6 +1315,34 @@ DryRun mock 기준으로 구조가 맞다.
 
 ### 7. 개발자 AI에게 전달할 수정 지시문
 - 실제 구현 결과를 기준으로 재검토하라.
+"@
+        }
+        "leader_review" {
+            $decision = if ($MockMetadata.ContainsKey("Decision")) { $MockMetadata["Decision"] } else { "QA_READY" }
+            $beRequired = if ($MockMetadata.ContainsKey("BeRequired")) { [string]$MockMetadata["BeRequired"] } else { "false" }
+            $feRequired = if ($MockMetadata.ContainsKey("FeRequired")) { [string]$MockMetadata["FeRequired"] } else { "false" }
+            $nextOrder = if ($MockMetadata.ContainsKey("NextOrder")) { [string]$MockMetadata["NextOrder"] } else { "qa" }
+            return @"
+Decision: $decision
+BE_REQUIRED: $beRequired
+FE_REQUIRED: $feRequired
+NEXT_ORDER: $nextOrder
+
+### 1. 현재 단계
+- reviewer 결과 검토
+
+### 2. 현재 판정
+- $decision
+
+### 3. 근거
+- DryRun mock 결과다.
+
+### 4. 다음 액션
+- NEXT_ORDER 기준으로 다음 역할을 진행한다.
+
+### 5. 체크리스트
+- reviewer 지적 중 실제 구현 필요 사항만 재작업으로 분류
+- qa 불필요 실행 방지
 "@
         }
         "qa" {
@@ -1458,7 +1541,7 @@ function Get-AllAgentStatuses {
     param([Parameter(Mandatory)][pscustomobject]$Config)
 
     $statuses = @()
-    foreach ($roleName in @("leader", "be_dev", "fe_dev", "reviewer", "qa", "leader_final")) {
+    foreach ($roleName in @("leader", "be_dev", "fe_dev", "reviewer", "leader_review", "qa", "leader_final")) {
         $status = Get-AgentStatus -Config $Config -Role $roleName
         if ($status) {
             $statuses += $status
@@ -1800,7 +1883,7 @@ function Invoke-AgentPrompt {
 
 function Invoke-AgentRole {
     param(
-        [Parameter(Mandatory)][ValidateSet("leader", "be_dev", "fe_dev", "reviewer", "qa", "leader_final")][string]$Role,
+        [Parameter(Mandatory)][ValidateSet("leader", "be_dev", "fe_dev", "reviewer", "leader_review", "qa", "leader_final")][string]$Role,
         [string]$PlanName = "",
         [string]$Model,
         [AllowEmptyString()][string]$Cli,
@@ -1867,10 +1950,10 @@ function Get-ReportDirectives {
             $directives.Decision = $Matches[1].Trim().ToUpperInvariant()
         }
         elseif ($line -match '^\s*BE_REQUIRED\s*:\s*(\S.*?)\s*$') {
-            $directives.BeRequired = $Matches[1].Trim().ToLowerInvariant() -eq "true"
+            $directives.BeRequired = Convert-DirectiveBoolean -Value $Matches[1]
         }
         elseif ($line -match '^\s*FE_REQUIRED\s*:\s*(\S.*?)\s*$') {
-            $directives.FeRequired = $Matches[1].Trim().ToLowerInvariant() -eq "true"
+            $directives.FeRequired = Convert-DirectiveBoolean -Value $Matches[1]
         }
         elseif ($line -match '^\s*NEXT_ORDER\s*:\s*(\S.*?)\s*$') {
             $directives.NextOrder = $Matches[1].Trim()
@@ -1880,6 +1963,24 @@ function Get-ReportDirectives {
     return [pscustomobject]$directives
 }
 
+function Convert-DirectiveBoolean {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $null
+    }
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        "true" { return $true }
+        "yes" { return $true }
+        "y" { return $true }
+        "false" { return $false }
+        "no" { return $false }
+        "n" { return $false }
+        default { return $null }
+    }
+}
+
 function Get-CycleSummaryObject {
     param(
         [Parameter(Mandatory)][pscustomobject]$Config,
@@ -1887,7 +1988,7 @@ function Get-CycleSummaryObject {
         [string]$FinalDecision = "BLOCKED"
     )
 
-    $roles = @("leader", "be_dev", "fe_dev", "reviewer", "qa", "leader_final")
+    $roles = @("leader", "be_dev", "fe_dev", "reviewer", "leader_review", "qa", "leader_final")
     $agents = @()
     $promptTotal = 0
     $completionTotal = 0
