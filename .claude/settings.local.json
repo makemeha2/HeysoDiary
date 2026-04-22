@@ -4,7 +4,12 @@
       "Bash(xargs grep:*)",
       "Bash(ls -la /c/Projects/HeysoDiary/HeysoDiaryFrontEnd/.env* /c/Projects/HeysoDiary/HeysoDiaryBackEnd/src/main/resources)",
       "Bash(npm run:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(mvn clean *)",
+      "Bash(mvn test *)",
+      "Bash(mvn spring-boot:run -Dspring.profiles.active=local)",
+      "Bash(curl -s http://localhost:19090/actuator/health)",
+      "Bash(pkill -f \"spring-boot:run\")"
     ]
   }
 }
