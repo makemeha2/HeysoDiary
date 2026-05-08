@@ -91,8 +91,9 @@ Public endpoints (no auth): `/api/auth/oauth/google`, `/api/auth/validate`, Swag
 heyso.HeysoDiaryBackEnd/
   auth/       diary/      diaryAi/     diaryAiPolish/
   aichat/     mypage/     comCd/       mail/
-  monitoring/ ai/         security/    config/
-  user/       utils/
+  monitoring/ monitoringMng/           ai/          aiTemplate/
+  security/   config/     user/        userMng/
+  support/    utils/
 ```
 
 Each domain may contain: `controller/`, `service/`, `dto/`, `model/`, `mapper/`, `support/`, `type/`, `security/`
@@ -149,7 +150,9 @@ Auth failures, access denials, and abnormal tokens are logged to the `monitoring
 
 ### Component File Structure
 
-```jsx
+프론트엔드는 TypeScript(`.tsx`) 기반으로 광범위하게 전환되어 있다 (admin 영역뿐 아니라 워크스페이스/엔트리 포함). 신규 컴포넌트는 `.tsx`로 작성한다.
+
+```tsx
 const ComponentName = () => {
   return <div>{/* content */}</div>;
 };
@@ -163,6 +166,14 @@ Rules:
 - Always end with `export default ComponentName;` on its own line
 - Never use `export default function ComponentName() {}` inline form
 
+### Source Layout
+
+- `src/app/` — 앱 부트스트랩 (`App.tsx`, `provider.tsx`, `router.tsx`)
+- `src/features/{domain}/` — 도메인 단위 기능 (예: `features/workspace/`). 내부에 `api/`, `components/`, `hooks/`, `constants/`, `types/` 배치
+- `src/admin/` — 어드민 사이트 (별도 트리)
+- `src/pages/` — 라우팅용 잔여 페이지 (대부분 `features/`로 이전됨)
+- `src/components/`, `src/hooks/`, `src/lib/`, `src/stores/` — 공용 모듈
+
 ### State Management
 
 - **Zustand** (`src/stores/`): auth state and global app state only
@@ -171,12 +182,12 @@ Rules:
 
 ### API Calls
 
-All API calls go through `src/lib/apiClient.js` → `authFetch`. Domain API functions live in `src/pages/{domain}/api/` or domain-specific hooks.
+All API calls go through `src/lib/apiClient.js` → `authFetch`. Domain API functions live in `src/features/{domain}/api/` (or 일부 잔여 `src/pages/{domain}/api/`) 또는 도메인 훅 안에 둔다.
 
 ### Path Aliases
 
 Configured in `tsconfig.json` and `vite.config.js`:
-`@/*`, `@pages/*`, `@components/*`, `@stores/*`, `@lib/*`, `@assets/*`, `@hooks/*`, `@admin/*`
+`@/*`, `@pages/*`, `@components/*`, `@stores/*`, `@lib/*`, `@assets/*`, `@hooks/*`, `@admin/*`, `@features/*`, `@app/*`
 
 ---
 
